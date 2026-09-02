@@ -1,0 +1,208 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* was var(--font-sans) — a variable nothing defined, so Geist never applied */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* ABBank brand — sampled from the logo */
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-orange: var(--brand-orange);
+
+  /* One risk ramp. Every badge, rail, bar and chart series reads these. */
+  --color-risk-critical: var(--risk-critical);
+  --color-risk-critical-surface: var(--risk-critical-surface);
+  --color-risk-high: var(--risk-high);
+  --color-risk-high-surface: var(--risk-high-surface);
+  --color-risk-medium: var(--risk-medium);
+  --color-risk-medium-surface: var(--risk-medium-surface);
+  --color-risk-low: var(--risk-low);
+  --color-risk-low-surface: var(--risk-low-surface);
+  --color-risk-info: var(--risk-info);
+  --color-risk-info-surface: var(--risk-info-surface);
+  --color-risk-ok: var(--risk-ok);
+  /* Green, for "assessed recently". risk-ok is the brand teal and reads as a
+     status, not as a calendar recency, so recency gets its own hue. */
+  --color-risk-fresh: var(--risk-fresh);
+  --color-risk-fresh-surface: var(--risk-fresh-surface);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* Warm neutrals — paper, not screen grey */
+  --background: oklch(0.985 0.003 75);
+  --foreground: oklch(0.215 0.006 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.215 0.006 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.215 0.006 60);
+
+  /* Primary is ABBank teal, darkened to clear AA on white */
+  --primary: oklch(0.503 0.077 195);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.958 0.004 75);
+  --secondary-foreground: oklch(0.29 0.007 60);
+  --muted: oklch(0.958 0.004 75);
+  --muted-foreground: oklch(0.475 0.007 60);
+  --accent: oklch(0.955 0.018 195);
+  --accent-foreground: oklch(0.44 0.072 195);
+  --destructive: oklch(0.452 0.163 25);
+  --border: oklch(0.905 0.005 75);
+  --input: oklch(0.905 0.005 75);
+  --ring: oklch(0.585 0.083 195);
+
+  --brand: oklch(0.585 0.083 195);
+  --brand-deep: oklch(0.503 0.077 195);
+  --brand-surface: oklch(0.955 0.018 195);
+  --brand-orange: oklch(0.702 0.161 55);
+
+  --risk-critical: oklch(0.452 0.163 25);
+  --risk-critical-surface: oklch(0.955 0.022 25);
+  --risk-high: oklch(0.545 0.133 55);
+  --risk-high-surface: oklch(0.962 0.028 65);
+  --risk-medium: oklch(0.525 0.098 88);
+  --risk-medium-surface: oklch(0.966 0.034 92);
+  --risk-low: oklch(0.512 0.086 255);
+  --risk-low-surface: oklch(0.961 0.019 255);
+  --risk-info: oklch(0.535 0.008 60);
+  --risk-info-surface: oklch(0.958 0.004 75);
+  --risk-ok: oklch(0.503 0.077 195);
+  --risk-fresh: oklch(0.487 0.108 150);
+  --risk-fresh-surface: oklch(0.957 0.031 150);
+
+  /* Charts read the risk ramp — never their own hex */
+  --chart-1: var(--risk-critical);
+  --chart-2: var(--risk-high);
+  --chart-3: var(--risk-medium);
+  --chart-4: var(--risk-low);
+  --chart-5: var(--risk-info);
+
+  --radius: 0.625rem;
+
+  --sidebar: oklch(0.978 0.004 75);
+  --sidebar-foreground: oklch(0.215 0.006 60);
+  --sidebar-primary: oklch(0.503 0.077 195);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.955 0.018 195);
+  --sidebar-accent-foreground: oklch(0.44 0.072 195);
+  --sidebar-border: oklch(0.918 0.005 75);
+  --sidebar-ring: oklch(0.585 0.083 195);
+}
+
+.dark {
+  --background: oklch(0.185 0.006 60);
+  --foreground: oklch(0.965 0.003 75);
+  --card: oklch(0.232 0.006 60);
+  --card-foreground: oklch(0.965 0.003 75);
+  --popover: oklch(0.232 0.006 60);
+  --popover-foreground: oklch(0.965 0.003 75);
+  --primary: oklch(0.735 0.089 195);
+  --primary-foreground: oklch(0.185 0.006 60);
+  --secondary: oklch(0.288 0.006 60);
+  --secondary-foreground: oklch(0.965 0.003 75);
+  --muted: oklch(0.288 0.006 60);
+  --muted-foreground: oklch(0.715 0.006 60);
+  --accent: oklch(0.315 0.032 195);
+  --accent-foreground: oklch(0.85 0.06 195);
+  --destructive: oklch(0.672 0.176 25);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.645 0.082 195);
+
+  --brand: oklch(0.705 0.088 195);
+  --brand-deep: oklch(0.735 0.089 195);
+  --brand-surface: oklch(0.315 0.032 195);
+  --brand-orange: oklch(0.755 0.152 58);
+
+  --risk-critical: oklch(0.672 0.176 25);
+  --risk-critical-surface: oklch(0.305 0.058 25);
+  --risk-high: oklch(0.735 0.142 60);
+  --risk-high-surface: oklch(0.312 0.052 55);
+  --risk-medium: oklch(0.775 0.116 90);
+  --risk-medium-surface: oklch(0.315 0.042 88);
+  --risk-low: oklch(0.712 0.098 255);
+  --risk-low-surface: oklch(0.305 0.042 255);
+  --risk-info: oklch(0.715 0.006 60);
+  --risk-info-surface: oklch(0.288 0.006 60);
+  --risk-ok: oklch(0.735 0.089 195);
+  --risk-fresh: oklch(0.735 0.104 150);
+  --risk-fresh-surface: oklch(0.303 0.048 150);
+
+  --chart-1: var(--risk-critical);
+  --chart-2: var(--risk-high);
+  --chart-3: var(--risk-medium);
+  --chart-4: var(--risk-low);
+  --chart-5: var(--risk-info);
+
+  --sidebar: oklch(0.232 0.006 60);
+  --sidebar-foreground: oklch(0.965 0.003 75);
+  --sidebar-primary: oklch(0.735 0.089 195);
+  --sidebar-primary-foreground: oklch(0.185 0.006 60);
+  --sidebar-accent: oklch(0.315 0.032 195);
+  --sidebar-accent-foreground: oklch(0.85 0.06 195);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.645 0.082 195);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Tabular figures everywhere a number is compared to another number */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}

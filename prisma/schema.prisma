@@ -1,0 +1,981 @@
+// SecPlatform - Security Asset Inventory & Vulnerability Management Platform
+// Database Schema - All MVP Entities
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgTrgm(map: "pg_trgm"), pgVector(map: "vector", schema: "public")]
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Criticality {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFORMATIONAL
+}
+
+enum ApplicationStatus {
+  ACTIVE
+  DECOMMISSIONED
+  PLANNING
+  ARCHIVED
+}
+
+enum AliasSource {
+  MANUAL
+  IMPORT
+  AI_LEARNED
+  JIRA_COMPONENT
+}
+
+enum OwnerType {
+  APPLICATION_OWNER
+  TECHNICAL_OWNER
+  SECURITY_OWNER
+}
+
+enum SLAStatus {
+  ON_TRACK
+  AT_RISK
+  BREACHED
+  PAUSED
+  EXEMPT
+  MET
+  MISSED
+}
+
+enum EntityType {
+  ASSESSMENT
+  VULNERABILITY
+}
+
+enum MappingStatus {
+  AUTO_MATCHED
+  HUMAN_CONFIRMED
+  HUMAN_OVERRIDDEN
+  UNRESOLVED
+  REJECTED
+}
+
+enum ImportStatus {
+  UPLOADED
+  VALIDATING
+  PREVIEWING
+  CONFIRMED
+  IMPORTING
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ImportRowStatus {
+  NEW
+  UPDATED
+  UNCHANGED
+  INVALID
+  DUPLICATE
+  REMOVED
+}
+
+enum SyncStatus {
+  SYNCED
+  ERROR
+  DELETED
+}
+
+/// Where a synced ticket sits in the AI triage pipeline: application
+/// resolution, scope analysis and security-review focus points.
+enum TriageStatus {
+  PENDING
+  DONE
+  FAILED
+  SKIPPED
+}
+
+enum ExternalSource {
+  JIRA
+  SERVICENOW
+  GITHUB
+  GITLAB
+  SCANNER
+}
+
+enum UserRole {
+  SYSTEM_ADMIN
+  SECURITY_ADMIN
+  SECURITY_MANAGER
+  SECURITY_ENGINEER
+  APPLICATION_OWNER
+  DEVELOPER
+  AUDITOR
+  EXECUTIVE
+  READ_ONLY
+}
+
+enum ChangeSource {
+  MANUAL
+  JIRA_SYNC
+  SYSTEM
+  AI
+}
+
+enum AuditSource {
+  UI
+  API
+  SYSTEM
+  JIRA_SYNC
+  AI
+}
+
+enum AIRecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+/// What a security assessment covers.
+///
+/// The bank runs the same kinds of testing at two different scopes, and the
+/// distinction drives everything downstream: a GOLIVE assessment examines only
+/// what changed (a new feature, a hotfix), while a PERIODIC assessment covers
+/// the whole application on a risk-based cadence. One application routinely has
+/// both in flight, so findings inherit the scope they were discovered under.
+enum AssessmentScope {
+  GOLIVE
+  PERIODIC
+}
+
+enum RiskAcceptanceStatus {
+  /// Requested, awaiting a second person's approval. Not yet in force.
+  PENDING_APPROVAL
+  ACTIVE
+  EXPIRED
+  REVOKED
+  REJECTED
+}
+
+enum SyncType {
+  ASSESSMENT
+  VULNERABILITY
+  FULL
+}
+
+enum SyncTrigger {
+  SCHEDULED
+  MANUAL
+  WEBHOOK
+}
+
+enum SyncJobStatus {
+  STARTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+// ============================================================================
+// CORE ENTITIES
+// ============================================================================
+
+model BusinessUnit {
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String  @unique @db.VarChar(100)
+  parentId String? @map("parent_id") @db.Uuid
+
+  parent   BusinessUnit?  @relation("BusinessUnitHierarchy", fields: [parentId], references: [id])
+  children BusinessUnit[] @relation("BusinessUnitHierarchy")
+
+  applications Application[]
+  users        User[]
+  slaRules     SLARule[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("business_units")
+}
+
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  email          String   @unique @db.VarChar(255)
+  displayName    String   @map("display_name") @db.VarChar(255)
+  passwordHash   String?  @map("password_hash") @db.VarChar(255) // For dev auth only
+  ssoSubject     String?  @unique @map("sso_subject") @db.VarChar(255)
+  role           UserRole @default(READ_ONLY)
+  businessUnitId String?  @map("business_unit_id") @db.Uuid
+  isActive       Boolean  @default(true) @map("is_active")
+  lastLoginAt    DateTime? @map("last_login_at")
+
+  businessUnit BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+
+  // Ownership relations
+  ownedApplications   ApplicationOwner[]
+  createdApplications Application[]      @relation("ApplicationCreatedBy")
+  updatedApplications Application[]      @relation("ApplicationUpdatedBy")
+
+  // Assessment relations
+  requestedAssessments Assessment[] @relation("AssessmentRequester")
+  assignedAssessments  Assessment[] @relation("AssessmentAssignee")
+
+  // Vulnerability relations
+  assignedVulnerabilities  Vulnerability[] @relation("VulnerabilityAssignee")
+  fixOwnedVulnerabilities  Vulnerability[] @relation("VulnerabilityFixOwner")
+
+  // Other relations
+  riskAcceptancesAccepted  RiskAcceptance[] @relation("RiskAcceptedBy")
+  riskAcceptancesApproved  RiskAcceptance[] @relation("RiskApprovedBy")
+  applicationMappings      ApplicationMapping[] @relation("MappingResolvedBy")
+  assetImports             AssetImport[]
+  notifications            Notification[]
+  auditLogs                AuditLog[]
+  aiRecommendations        AIRecommendation[] @relation("AIDecisionBy")
+  settingUpdates           SystemSetting[]    @relation("SettingUpdatedBy")
+  statusChanges            StatusHistory[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model Application {
+  id               String            @id @default(uuid()) @db.Uuid
+  applicationId    String            @unique @map("application_id") @db.VarChar(50)
+  name             String            @db.VarChar(255)
+  normalizedName   String            @map("normalized_name") @db.VarChar(255)
+  description      String?           @db.Text
+  businessUnitId   String?           @map("business_unit_id") @db.Uuid
+  department       String?           @db.VarChar(100)
+  /// Business importance of the application, 1-3, where 1 is the most important.
+  /// Drives remediation deadlines and how often a full assessment is required.
+  level            Int               @default(2)
+  internetFacing   Boolean           @default(false) @map("internet_facing")
+  dataClassification String?         @map("data_classification") @db.VarChar(50)
+  complianceScope  String[]          @map("compliance_scope")
+  technologyStack  String[]          @map("technology_stack")
+  repositoryUrl    String?           @map("repository_url") @db.VarChar(500)
+  serviceUrl       String?           @map("service_url") @db.VarChar(500)
+  productionUrl    String?           @map("production_url") @db.VarChar(500)
+  status           ApplicationStatus @default(ACTIVE)
+  riskRating       String?           @map("risk_rating") @db.VarChar(50)
+  goLiveDate       DateTime?         @map("go_live_date") @db.Date
+
+  // Denormalized fields for query performance
+  /// Completion date of the most recent PERIODIC assessment, and when the next
+  /// one falls due. Maintained by the assessment service on completion.
+  lastAssessmentDate    DateTime? @map("last_assessment_date")
+  nextAssessmentDue     DateTime? @map("next_assessment_due") @db.Date
+  /// Months between periodic assessments. Null means "use the risk-based policy"
+  /// (annual for higher-risk applications, biennial for the rest).
+  assessmentIntervalMonths Int?   @map("assessment_interval_months")
+  openVulnerabilityCount Int      @default(0) @map("open_vulnerability_count")
+  openCriticalCount      Int      @default(0) @map("open_critical_count")
+  openHighCount          Int      @default(0) @map("open_high_count")
+
+  // Tracking
+  lastImportId String?  @map("last_import_id") @db.Uuid
+  createdById  String?  @map("created_by") @db.Uuid
+  updatedById  String?  @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  businessUnit BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+  createdBy    User?         @relation("ApplicationCreatedBy", fields: [createdById], references: [id])
+  updatedBy    User?         @relation("ApplicationUpdatedBy", fields: [updatedById], references: [id])
+
+  aliases                  ApplicationAlias[]
+  owners                   ApplicationOwner[]
+  assessmentApplications   AssessmentApplication[]
+  vulnerabilityApplications VulnerabilityApplication[]
+  applicationMappings      ApplicationMapping[]
+  importRows               AssetImportRow[]
+
+  @@index([normalizedName])
+  @@index([businessUnitId])
+  @@index([level])
+  @@index([status])
+  @@index([internetFacing])
+  @@index([nextAssessmentDue])
+  @@map("applications")
+}
+
+model ApplicationAlias {
+  id              String      @id @default(uuid()) @db.Uuid
+  applicationId   String      @map("application_id") @db.Uuid
+  alias           String      @db.VarChar(255)
+  normalizedAlias String      @map("normalized_alias") @db.VarChar(255)
+  source          AliasSource @default(MANUAL)
+  createdById     String?     @map("created_by") @db.Uuid
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, normalizedAlias])
+  @@index([normalizedAlias])
+  @@map("application_aliases")
+}
+
+model ApplicationOwner {
+  id            String    @id @default(uuid()) @db.Uuid
+  applicationId String    @map("application_id") @db.Uuid
+  userId        String?   @map("user_id") @db.Uuid
+  ownerName     String?   @map("owner_name") @db.VarChar(255)
+  ownerEmail    String?   @map("owner_email") @db.VarChar(255)
+  ownerType     OwnerType
+  isPrimary     Boolean   @default(false) @map("is_primary")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User?       @relation(fields: [userId], references: [id])
+
+  @@index([applicationId])
+  @@index([userId])
+  @@map("application_owners")
+}
+
+// ============================================================================
+// ASSESSMENT ENTITIES
+// ============================================================================
+
+model AssessmentType {
+  id              String  @id @default(uuid()) @db.Uuid
+  name            String  @unique @db.VarChar(100)
+  code            String  @unique @db.VarChar(50)
+  description     String? @db.Text
+  defaultSlaDays  Int?    @map("default_sla_days")
+  isActive        Boolean @default(true) @map("is_active")
+  requiresPeriodic Boolean @default(false) @map("requires_periodic")
+  periodMonths    Int?    @map("period_months")
+
+  assessments Assessment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("assessment_types")
+}
+
+model Assessment {
+  id               String   @id @default(uuid()) @db.Uuid
+  internalKey      String   @unique @map("internal_key") @db.VarChar(20)
+  title            String   @db.VarChar(500)
+  description      String?  @db.Text
+  assessmentTypeId String   @map("assessment_type_id") @db.Uuid
+  /// Go-live (changes only) vs periodic (whole application). Orthogonal to
+  /// assessment type: a penetration test can be either.
+  scope            AssessmentScope?
+  status           String   @db.VarChar(50) // Flexible to support configurable workflows
+  priority         Criticality?
+  requesterId      String?  @map("requester_id") @db.Uuid
+  assigneeId       String?  @map("assignee_id") @db.Uuid
+  createdDate      DateTime @map("created_date")
+  dueDate          DateTime? @map("due_date") @db.Date
+  startedDate      DateTime? @map("started_date")
+  completedDate    DateTime? @map("completed_date")
+  findingCount     Int      @default(0) @map("finding_count")
+  slaStatus        SLAStatus? @map("sla_status")
+  complexity       String?  @db.VarChar(50)
+  externalIssueId  String?  @map("external_issue_id") @db.Uuid
+  lastSyncedAt     DateTime? @map("last_synced_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  assessmentType AssessmentType @relation(fields: [assessmentTypeId], references: [id])
+  requester      User?          @relation("AssessmentRequester", fields: [requesterId], references: [id])
+  assignee       User?          @relation("AssessmentAssignee", fields: [assigneeId], references: [id])
+  externalIssue  ExternalIssue? @relation(fields: [externalIssueId], references: [id])
+
+  assessmentApplications AssessmentApplication[]
+  vulnerabilities        Vulnerability[]
+
+  @@index([status])
+  @@index([assigneeId])
+  @@index([assessmentTypeId])
+  @@index([scope])
+  @@index([dueDate])
+  @@index([externalIssueId])
+  @@index([slaStatus])
+  @@index([createdDate])
+  @@index([completedDate])
+  @@map("assessments")
+}
+
+model AssessmentApplication {
+  assessmentId  String  @map("assessment_id") @db.Uuid
+  applicationId String  @map("application_id") @db.Uuid
+  isPrimary     Boolean @default(true) @map("is_primary")
+  mappedBy      String? @map("mapped_by") @db.VarChar(50) // auto, manual, ai_confirmed
+  mappingConfidence Decimal? @map("mapping_confidence") @db.Decimal(5, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  assessment  Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([assessmentId, applicationId])
+  @@index([applicationId, assessmentId])
+  @@map("assessment_applications")
+}
+
+// ============================================================================
+// VULNERABILITY ENTITIES
+// ============================================================================
+
+model Vulnerability {
+  id                 String    @id @default(uuid()) @db.Uuid
+  internalKey        String    @unique @map("internal_key") @db.VarChar(20)
+  title              String    @db.VarChar(500)
+  description        String?   @db.Text
+  vulnerabilityType  String?   @map("vulnerability_type") @db.VarChar(100)
+  cweId              String?   @map("cwe_id") @db.VarChar(20)
+  cveId              String?   @map("cve_id") @db.VarChar(20)
+  cvssScore          Decimal?  @map("cvss_score") @db.Decimal(3, 1)
+  cvssVector         String?   @map("cvss_vector") @db.VarChar(100)
+  severity           Severity
+  /// Inherited from the assessment that found it, so go-live findings can be
+  /// separated from periodic ones for the same application.
+  scope              AssessmentScope?
+  status             String    @db.VarChar(50) // Flexible for configurable workflows
+  source             String?   @db.VarChar(50) // assessment, scan, pentest, bug_bounty, manual
+  sourceAssessmentId String?   @map("source_assessment_id") @db.Uuid
+  assigneeId         String?   @map("assignee_id") @db.Uuid
+  fixOwnerId         String?   @map("fix_owner_id") @db.Uuid
+  createdDate        DateTime  @map("created_date")
+  dueDate            DateTime? @map("due_date") @db.Date
+  fixedDate          DateTime? @map("fixed_date")
+  verifiedDate       DateTime? @map("verified_date")
+  closedDate         DateTime? @map("closed_date")
+  slaStatus          SLAStatus? @map("sla_status")
+  overdueDays        Int?      @map("overdue_days")
+  recommendation     String?   @db.Text
+  evidence           String?   @db.Text
+  rootCause          String?   @map("root_cause") @db.Text
+  environment        String?   @db.VarChar(50)
+  affectedComponent  String?   @map("affected_component") @db.VarChar(255)
+  remediationEffort  String?   @map("remediation_effort") @db.VarChar(50) // low, medium, high
+  isFalsePositive    Boolean   @default(false) @map("is_false_positive")
+  externalIssueId    String?   @map("external_issue_id") @db.Uuid
+  lastSyncedAt       DateTime? @map("last_synced_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  sourceAssessment Assessment?    @relation(fields: [sourceAssessmentId], references: [id])
+  assignee         User?          @relation("VulnerabilityAssignee", fields: [assigneeId], references: [id])
+  fixOwner         User?          @relation("VulnerabilityFixOwner", fields: [fixOwnerId], references: [id])
+  externalIssue    ExternalIssue? @relation(fields: [externalIssueId], references: [id])
+
+  vulnerabilityApplications VulnerabilityApplication[]
+  riskAcceptances           RiskAcceptance[]
+
+  @@index([severity])
+  @@index([status])
+  @@index([slaStatus])
+  @@index([dueDate])
+  @@index([assigneeId])
+  @@index([fixOwnerId])
+  @@index([externalIssueId])
+  @@index([cveId])
+  @@index([cweId])
+  @@index([createdDate])
+  @@index([closedDate])
+  @@index([sourceAssessmentId])
+  @@map("vulnerabilities")
+}
+
+model VulnerabilityApplication {
+  vulnerabilityId String  @map("vulnerability_id") @db.Uuid
+  applicationId   String  @map("application_id") @db.Uuid
+  isPrimary       Boolean @default(true) @map("is_primary")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  vulnerability Vulnerability @relation(fields: [vulnerabilityId], references: [id], onDelete: Cascade)
+  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([vulnerabilityId, applicationId])
+  @@index([applicationId, vulnerabilityId])
+  @@map("vulnerability_applications")
+}
+
+model RiskAcceptance {
+  id              String               @id @default(uuid()) @db.Uuid
+  vulnerabilityId String               @map("vulnerability_id") @db.Uuid
+  acceptedById    String               @map("accepted_by") @db.Uuid
+  approvedById    String?              @map("approved_by") @db.Uuid
+  justification   String               @db.Text
+  acceptedDate    DateTime             @map("accepted_date")
+  /// When the second person signed it off. Null while awaiting approval.
+  approvedDate    DateTime?            @map("approved_date")
+  expirationDate  DateTime?            @map("expiration_date") @db.Date
+  /// Requests start pending: an acceptance is only in force once approved.
+  status          RiskAcceptanceStatus @default(PENDING_APPROVAL)
+  conditions      String?              @db.Text
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  vulnerability Vulnerability @relation(fields: [vulnerabilityId], references: [id])
+  acceptedBy    User          @relation("RiskAcceptedBy", fields: [acceptedById], references: [id])
+  approvedBy    User?         @relation("RiskApprovedBy", fields: [approvedById], references: [id])
+
+  @@index([vulnerabilityId])
+  @@index([status])
+  @@index([expirationDate])
+  @@map("risk_acceptances")
+}
+
+// ============================================================================
+// STATUS TRACKING
+// ============================================================================
+
+model StatusHistory {
+  id         String       @id @default(uuid()) @db.Uuid
+  entityType EntityType   @map("entity_type")
+  entityId   String       @map("entity_id") @db.Uuid
+  fromStatus String?      @map("from_status") @db.VarChar(50)
+  toStatus   String       @map("to_status") @db.VarChar(50)
+  changedById String?     @map("changed_by") @db.Uuid
+  changedAt  DateTime     @map("changed_at")
+  reason     String?      @db.Text
+  source     ChangeSource @default(MANUAL)
+
+  changedBy User? @relation(fields: [changedById], references: [id])
+
+  @@index([entityType, entityId, changedAt])
+  @@index([entityType, entityId])
+  @@map("status_history")
+}
+
+// ============================================================================
+// INTEGRATION ENTITIES
+// ============================================================================
+
+model ExternalIssue {
+  id            String         @id @default(uuid()) @db.Uuid
+  source        ExternalSource
+  sourceId      String         @map("source_id") @db.VarChar(100)
+  sourceProject String?        @map("source_project") @db.VarChar(100)
+  issueType     String?        @map("issue_type") @db.VarChar(50)
+  title         String?        @db.VarChar(500)
+  description   String?        @db.Text
+  status        String?        @db.VarChar(100)
+  priority      String?        @db.VarChar(50)
+  assigneeEmail String?        @map("assignee_email") @db.VarChar(255)
+  reporterEmail String?        @map("reporter_email") @db.VarChar(255)
+  labels        String[]
+  components    String[]
+  customFields  Json?          @map("custom_fields") @db.JsonB
+  createdDate   DateTime?      @map("created_date")
+  updatedDate   DateTime?      @map("updated_date")
+  resolvedDate  DateTime?      @map("resolved_date")
+  rawData       Json?          @map("raw_data") @db.JsonB
+  syncStatus    SyncStatus     @default(SYNCED) @map("sync_status")
+  lastSyncedAt  DateTime       @map("last_synced_at")
+
+  // AI triage of the raw ticket. Ticket text is written by requesters who do
+  // not use the inventory's application names, so every synced issue is queued
+  // for analysis: which inventory application it concerns, what the change
+  // covers, and which points need a security assessment.
+  triageStatus  TriageStatus   @default(PENDING) @map("triage_status")
+  triage        Json?          @db.JsonB
+  triagedAt     DateTime?      @map("triaged_at")
+  triageModel   String?        @map("triage_model") @db.VarChar(100)
+  triageError   String?        @map("triage_error") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  assessments        Assessment[]
+  vulnerabilities    Vulnerability[]
+  applicationMapping ApplicationMapping?
+
+  @@unique([source, sourceId])
+  @@index([sourceId])
+  @@index([source])
+  @@index([status])
+  @@index([lastSyncedAt])
+  @@index([triageStatus])
+  @@map("external_issues")
+}
+
+model ApplicationMapping {
+  id              String        @id @default(uuid()) @db.Uuid
+  externalIssueId String        @unique @map("external_issue_id") @db.Uuid
+  applicationId   String?       @map("application_id") @db.Uuid
+  status          MappingStatus @default(UNRESOLVED)
+  confidenceScore Decimal?      @map("confidence_score") @db.Decimal(5, 2)
+  matchMethod     String?       @map("match_method") @db.VarChar(50) // exact, alias, fuzzy, ai, manual
+  evidence        Json?         @db.JsonB
+  aiExplanation   String?       @map("ai_explanation") @db.Text
+  candidates      Json?         @db.JsonB
+  resolvedById    String?       @map("resolved_by") @db.Uuid
+  resolvedAt      DateTime?     @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  externalIssue ExternalIssue @relation(fields: [externalIssueId], references: [id])
+  application   Application?  @relation(fields: [applicationId], references: [id])
+  resolvedBy    User?         @relation("MappingResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([status])
+  @@index([applicationId])
+  @@map("application_mappings")
+}
+
+model JiraSyncHistory {
+  id               String        @id @default(uuid()) @db.Uuid
+  syncType         SyncType      @map("sync_type")
+  status           SyncJobStatus
+  trigger          SyncTrigger?
+  startedAt        DateTime      @map("started_at")
+  completedAt      DateTime?     @map("completed_at")
+  issuesFetched    Int           @default(0) @map("issues_fetched")
+  issuesCreated    Int           @default(0) @map("issues_created")
+  issuesUpdated    Int           @default(0) @map("issues_updated")
+  errors           Json?         @db.JsonB
+  jqlUsed          String?       @map("jql_used") @db.Text
+  lastIssueUpdatedAt DateTime?   @map("last_issue_updated_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([syncType, startedAt])
+  @@map("jira_sync_history")
+}
+
+// ============================================================================
+// SLA
+// ============================================================================
+
+model SLARule {
+  id              String      @id @default(uuid()) @db.Uuid
+  name            String      @db.VarChar(100)
+  entityType      EntityType  @map("entity_type")
+  severity        Severity?
+  /// Matches applications at this level (1-3). Null matches any level.
+  appLevel        Int?         @map("app_level")
+  internetFacing  Boolean?    @map("internet_facing")
+  businessUnitId  String?     @map("business_unit_id") @db.Uuid
+  environment     String?     @db.VarChar(50)
+  complianceScope String?     @map("compliance_scope") @db.VarChar(50)
+  slaDays         Int         @map("sla_days")
+  warningDaysBefore Int       @default(3) @map("warning_days_before")
+  priority        Int         @default(0) // Higher = more specific
+  isActive        Boolean     @default(true) @map("is_active")
+  effectiveFrom   DateTime    @map("effective_from") @db.Date
+  effectiveTo     DateTime?   @map("effective_to") @db.Date
+  createdById     String?     @map("created_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  businessUnit BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+
+  @@index([entityType, isActive])
+  @@index([severity])
+  @@map("sla_rules")
+}
+
+// ============================================================================
+// IMPORT
+// ============================================================================
+
+model AssetImport {
+  id              String       @id @default(uuid()) @db.Uuid
+  fileName        String       @map("file_name") @db.VarChar(255)
+  fileSize        Int?         @map("file_size")
+  fileHash        String?      @map("file_hash") @db.VarChar(64)
+  status          ImportStatus @default(UPLOADED)
+  totalRows       Int?         @map("total_rows")
+  newCount        Int?         @map("new_count")
+  updatedCount    Int?         @map("updated_count")
+  unchangedCount  Int?         @map("unchanged_count")
+  invalidCount    Int?         @map("invalid_count")
+  duplicateCount  Int?         @map("duplicate_count")
+  removedCount    Int?         @map("removed_count")
+  columnMapping   Json?        @map("column_mapping") @db.JsonB
+  validationErrors Json?       @map("validation_errors") @db.JsonB
+  importedById    String       @map("imported_by") @db.Uuid
+  startedAt       DateTime?    @map("started_at")
+  completedAt     DateTime?    @map("completed_at")
+  rolledBackAt    DateTime?    @map("rolled_back_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  importedBy User           @relation(fields: [importedById], references: [id])
+  rows       AssetImportRow[]
+
+  @@index([status])
+  @@index([importedById])
+  @@map("asset_imports")
+}
+
+model AssetImportRow {
+  id               String          @id @default(uuid()) @db.Uuid
+  importId         String          @map("import_id") @db.Uuid
+  rowNumber        Int             @map("row_number")
+  rawData          Json            @map("raw_data") @db.JsonB
+  status           ImportRowStatus
+  applicationId    String?         @map("application_id") @db.Uuid
+  changes          Json?           @db.JsonB
+  validationErrors Json?           @map("validation_errors") @db.JsonB
+  isIncluded       Boolean         @default(true) @map("is_included")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  import      AssetImport  @relation(fields: [importId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id])
+
+  @@index([importId])
+  @@index([status])
+  @@map("asset_import_rows")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  type         String   @db.VarChar(50) // sla_breach, mapping_review, sync_failure, etc.
+  title        String   @db.VarChar(255)
+  message      String   @db.Text
+  entityType   String?  @map("entity_type") @db.VarChar(50)
+  entityId     String?  @map("entity_id") @db.Uuid
+  isRead       Boolean  @default(false) @map("is_read")
+  readAt       DateTime? @map("read_at")
+  channelsSent String[] @map("channels_sent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ============================================================================
+// AUDIT
+// ============================================================================
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  timestamp  DateTime    @default(now())
+  userId     String?     @map("user_id") @db.Uuid
+  action     String      @db.VarChar(100)
+  entityType String?     @map("entity_type") @db.VarChar(50)
+  entityId   String?     @map("entity_id") @db.Uuid
+  details    Json?       @db.JsonB
+  ipAddress  String?     @map("ip_address") @db.VarChar(45)
+  userAgent  String?     @map("user_agent") @db.VarChar(500)
+  source     AuditSource @default(UI)
+  aiMetadata Json?       @map("ai_metadata") @db.JsonB
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// AI
+// ============================================================================
+
+model AIRecommendation {
+  id              String                 @id @default(uuid()) @db.Uuid
+  type            String                 @db.VarChar(50) // mapping, assignment, priority, query, summary
+  inputSummary    String?                @map("input_summary") @db.Text
+  inputHash       String?                @map("input_hash") @db.VarChar(64)
+  modelProvider   String?                @map("model_provider") @db.VarChar(50)
+  modelId         String?                @map("model_id") @db.VarChar(100)
+  promptTemplate  String?                @map("prompt_template") @db.VarChar(100)
+  output          Json                   @db.JsonB
+  confidence      Decimal?               @db.Decimal(5, 2)
+  evidence        Json?                  @db.JsonB
+  status          AIRecommendationStatus @default(PENDING)
+  decisionById    String?                @map("decision_by") @db.Uuid
+  decisionAt      DateTime?              @map("decision_at")
+  decisionReason  String?                @map("decision_reason") @db.Text
+  tokensUsed      Int?                   @map("tokens_used")
+  latencyMs       Int?                   @map("latency_ms")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  decisionBy User? @relation("AIDecisionBy", fields: [decisionById], references: [id])
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("ai_recommendations")
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+
+model DailySnapshot {
+  id           String   @id @default(uuid()) @db.Uuid
+  snapshotDate DateTime @map("snapshot_date") @db.Date
+  metricType   String   @map("metric_type") @db.VarChar(100)
+  dimension    String?  @db.VarChar(255)
+  value        Decimal  @db.Decimal(15, 2)
+  details      Json?    @db.JsonB
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([snapshotDate, metricType, dimension])
+  @@index([snapshotDate])
+  @@index([metricType])
+  @@map("daily_snapshots")
+}
+
+// ============================================================================
+// WORKFLOW CONFIGURATION (Phase 2)
+// ============================================================================
+
+/// Platform configuration held in the database rather than the environment, so an
+/// administrator can change it without a redeploy. Values are JSON so one row
+/// holds a whole settings group; secrets inside a group are encrypted at rest by
+/// the service that owns it.
+model SystemSetting {
+  key         String   @id @db.VarChar(100)
+  value       Json     @db.JsonB
+  description String?  @db.Text
+  updatedById String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  updatedBy User? @relation("SettingUpdatedBy", fields: [updatedById], references: [id])
+
+  @@map("system_settings")
+}
+
+model WorkflowConfig {
+  id          String @id @default(uuid()) @db.Uuid
+  entityType  String @map("entity_type") @db.VarChar(50) // assessment, vulnerability
+  name        String @db.VarChar(100)
+  description String? @db.Text
+  isDefault   Boolean @default(false) @map("is_default")
+  isActive    Boolean @default(true) @map("is_active")
+
+  statuses    WorkflowStatus[]
+  transitions WorkflowTransition[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([entityType, isDefault])
+  @@map("workflow_configs")
+}
+
+model WorkflowStatus {
+  id           String @id @default(uuid()) @db.Uuid
+  workflowId   String @map("workflow_id") @db.Uuid
+  name         String @db.VarChar(50) // Internal status name
+  label        String @db.VarChar(100) // Display label
+  category     String @db.VarChar(30) // open, in_progress, resolved, terminal
+  color        String? @db.VarChar(7) // Hex color
+  sortOrder    Int    @default(0) @map("sort_order")
+  isInitial    Boolean @default(false) @map("is_initial")
+  isTerminal   Boolean @default(false) @map("is_terminal")
+  jiraStatusMapping String? @map("jira_status_mapping") @db.VarChar(100) // Maps to Jira status name
+
+  workflow     WorkflowConfig @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  transitionsFrom WorkflowTransition[] @relation("TransitionFrom")
+  transitionsTo   WorkflowTransition[] @relation("TransitionTo")
+
+  @@unique([workflowId, name])
+  @@map("workflow_statuses")
+}
+
+model WorkflowTransition {
+  id              String  @id @default(uuid()) @db.Uuid
+  workflowId      String  @map("workflow_id") @db.Uuid
+  fromStatusId    String  @map("from_status_id") @db.Uuid
+  toStatusId      String  @map("to_status_id") @db.Uuid
+  name            String? @db.VarChar(100) // Transition label e.g. "Start Work"
+  requiresComment Boolean @default(false) @map("requires_comment")
+  requiredRole    String? @map("required_role") @db.VarChar(50)
+
+  workflow   WorkflowConfig @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  fromStatus WorkflowStatus @relation("TransitionFrom", fields: [fromStatusId], references: [id], onDelete: Cascade)
+  toStatus   WorkflowStatus @relation("TransitionTo", fields: [toStatusId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, fromStatusId, toStatusId])
+  @@map("workflow_transitions")
+}
+
+// ============================================================================
+// JIRA WRITE-BACK (Phase 2)
+// ============================================================================
+
+model JiraWritebackQueue {
+  id              String   @id @default(uuid()) @db.Uuid
+  externalIssueId String   @map("external_issue_id") @db.Uuid
+  action          String   @db.VarChar(50) // assign, comment, status_change
+  payload         Json     @db.JsonB
+  status          String   @default("PENDING") @db.VarChar(20) // PENDING, APPROVED, EXECUTING, COMPLETED, FAILED, REJECTED
+  requestedById   String   @map("requested_by") @db.Uuid
+  approvedById    String?  @map("approved_by") @db.Uuid
+  approvedAt      DateTime? @map("approved_at")
+  executedAt      DateTime? @map("executed_at")
+  error           String?  @db.Text
+  retryCount      Int      @default(0) @map("retry_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([externalIssueId])
+  @@map("jira_writeback_queue")
+}
+
+// ============================================================================
+// NOTIFICATION PREFERENCES (Phase 2)
+// ============================================================================
+
+model NotificationPreference {
+  id          String  @id @default(uuid()) @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  eventType   String  @map("event_type") @db.VarChar(50)
+  inApp       Boolean @default(true) @map("in_app")
+  email       Boolean @default(false)
+  enabled     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, eventType])
+  @@map("notification_preferences")
+}

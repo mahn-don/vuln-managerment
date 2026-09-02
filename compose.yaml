@@ -1,0 +1,115 @@
+name: secplatform
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: secplatform
+      POSTGRES_USER: secplatform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secplatform-local}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secplatform -d secplatform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      target: tools
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://secplatform:${POSTGRES_PASSWORD:-secplatform-local}@postgres:5432/secplatform
+    command:
+      - sh
+      - -c
+      - >-
+        npx prisma migrate deploy &&
+        npm run db:seed
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    environment:
+      DATABASE_URL: postgresql://secplatform:${POSTGRES_PASSWORD:-secplatform-local}@postgres:5432/secplatform
+      REDIS_URL: redis://redis:6379
+      AUTH_SECRET: ${DOCKER_AUTH_SECRET:-local-only-change-before-production}
+      AUTH_URL: http://localhost:${APP_PORT:-3000}
+      AI_EXTERNAL_PROCESSING_ENABLED: ${AI_EXTERNAL_PROCESSING_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_ASSESSMENT: ${JIRA_PROJECT_ASSESSMENT:-}
+      JIRA_PROJECT_VULNERABILITY: ${JIRA_PROJECT_VULNERABILITY:-}
+      JIRA_ASSESSMENT_JQL: ${JIRA_ASSESSMENT_JQL:-}
+      JIRA_VULNERABILITY_JQL: ${JIRA_VULNERABILITY_JQL:-}
+      JIRA_WEBHOOK_SECRET: ${JIRA_WEBHOOK_SECRET:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    profiles: ["workers"]
+    build:
+      context: .
+      target: tools
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://secplatform:${POSTGRES_PASSWORD:-secplatform-local}@postgres:5432/secplatform
+      REDIS_URL: redis://redis:6379
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_ASSESSMENT: ${JIRA_PROJECT_ASSESSMENT:-}
+      JIRA_PROJECT_VULNERABILITY: ${JIRA_PROJECT_VULNERABILITY:-}
+      JIRA_ASSESSMENT_JQL: ${JIRA_ASSESSMENT_JQL:-}
+      JIRA_VULNERABILITY_JQL: ${JIRA_VULNERABILITY_JQL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    command: ["npm", "run", "workers"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
