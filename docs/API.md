@@ -78,6 +78,7 @@ Application list parameters include `page`, `limit`, `sort`, `order`, `search`, 
 | `PUT` | `/assessments/{id}` | Update editable metadata |
 | `PATCH` | `/assessments/{id}/status` | Apply a workflow transition |
 | `PATCH` | `/assessments/{id}/assign` | Assign an engineer |
+| `GET` | `/assessments/{id}/closure-readiness` | Which closure checks pass, and which block the close |
 | `GET` | `/assessments/{id}/history` | Status history |
 | `GET` | `/assessments/{id}/vulnerabilities` | Findings produced by the assessment |
 
@@ -95,6 +96,7 @@ List parameters include `page`, `limit`, `sort`, `order`, `search`, `status`, `a
 | `GET` | `/vulnerabilities/{id}/history` | Status history |
 | `GET` | `/vulnerabilities/{id}/risk-acceptance` | List risk acceptances |
 | `POST` | `/vulnerabilities/{id}/risk-acceptance` | Accept risk as the authenticated approver |
+| `POST` | `/vulnerabilities/{id}/risk-acceptance/{acceptanceId}/decision` | Approve or reject a requested acceptance |
 
 List parameters include `page`, `limit`, `sort`, `order`, `search`, `severity`, `status`, `slaStatus`, `applicationId`, `assigneeId`, `fixOwnerId`, `assessmentId`, `cveId`, and `cweId`.
 
@@ -123,9 +125,12 @@ The upload form fields are `file` and optional `columnMapping`, where `columnMap
 | `POST` | `/integrations/jira/writeback` | Queue a write-back action |
 | `POST` | `/integrations/jira/writeback/{id}` | Approve or reject a queued action |
 | `GET` | `/mappings` | Mapping review queue |
+| `GET` | `/integrations/jira/triage` | Triage backlog counts |
+| `POST` | `/integrations/jira/triage` | Triage a batch of pending tickets |
 | `POST` | `/mappings/{id}/confirm` | Confirm suggested application |
 | `POST` | `/mappings/{id}/override` | Select another application |
 | `POST` | `/mappings/{id}/reject` | Reject the mapping |
+| `POST` | `/mappings/{id}/reanalyze` | Re-run triage for one ticket |
 
 ### Jira Webhook
 
@@ -168,9 +173,19 @@ AI query requests are bounded per minute and per user/day. External vendor calls
 | `GET` | `/users` | List users |
 | `GET` | `/users/me` | Current user profile |
 | `PUT` | `/users/{id}/role` | Change a user's role |
+| `GET` | `/users/assignable` | Users eligible to take an assessment |
 | `GET` | `/sla/rules` | List SLA rules |
 | `POST` | `/sla/rules` | Create an SLA rule |
+| `GET` | `/settings/ai` | AI provider settings, without the token |
+| `PUT` | `/settings/ai` | Update AI provider settings |
+| `POST` | `/settings/ai/test` | Test the provider using the values supplied |
+| `GET` | `/settings/confluence` | Confluence settings, without the token |
+| `PUT` | `/settings/confluence` | Update Confluence settings |
+| `POST` | `/settings/confluence/test` | Test Confluence using the values supplied |
+| `GET` | `/settings/closure-checks` | Fields required before an assessment can close |
+| `PUT` | `/settings/closure-checks` | Update the closure check rules |
 | `GET` | `/workflows/{entityType}` | Workflow definition and transitions |
+| `GET` | `/workflows/{entityType}/transitions` | Transitions available from a status |
 | `GET` | `/audit` | Paginated audit log |
 | `GET` | `/audit/export` | Export up to 10,000 audit events as CSV |
 

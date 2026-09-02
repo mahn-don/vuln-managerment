@@ -1,6 +1,6 @@
 # Current Codebase Architecture
 
-This document describes the application as implemented. `SOLUTION_ARCHITECTURE.md` is the original product proposal and includes features, such as corporate SSO, that are not yet present.
+This document describes the application as implemented. `DOMAIN.md` describes the business rules it implements — assessment scope, application level, periodic cadence, closure checks and ticket triage. `SOLUTION_ARCHITECTURE.md` is the original product proposal and includes features, such as corporate SSO, that are not yet present.
 
 ## Runtime Topology
 
@@ -62,10 +62,10 @@ Keep business logic in services, not route handlers. Route handlers own HTTP con
 | Module | Responsibilities |
 |---|---|
 | `asset-management` | Applications, aliases, owners, security summary |
-| `assessment-management` | Assessment CRUD, assignment, lifecycle, status history |
+| `assessment-management` | Assessment CRUD, assignment, lifecycle, status history, periodic cadence, closure checks |
 | `vulnerability-management` | Findings, SLA calculation, risk acceptance, application counters |
-| `integration-engine` | Excel import, Jira adapter, synchronization, write-back queues |
-| `intelligence-engine` | Deterministic metrics, AI gateway, ticket analysis, mapping and assignment recommendations |
+| `integration-engine` | Excel import, Jira adapter, Confluence adapter, synchronization, write-back queues |
+| `intelligence-engine` | Deterministic metrics, AI gateway, ticket triage and sizing, application resolution, assignment recommendations |
 | `operations-console` | Search, dashboards, analytics, notifications, email facade |
 | `platform-services` | RBAC, ABAC scope filters, workflows, audit logging |
 
@@ -80,6 +80,7 @@ The primary entities are:
 - `Vulnerability`: finding affecting one or more applications, optionally created by an assessment.
 - `ExternalIssue`: normalized copy of an external Jira issue.
 - `ApplicationMapping`: reviewed relationship between an external issue and an application.
+- `SystemSetting`: administrator-configured integration and policy settings; secret fields are stored encrypted.
 - `StatusHistory` and `AuditLog`: lifecycle and accountability records.
 
 `AssessmentApplication` and `VulnerabilityApplication` implement the many-to-many application relationships. Application vulnerability counters are denormalized for dashboard and list performance and are recalculated after vulnerability changes.

@@ -70,6 +70,7 @@ npm run workers
 
 ## Documentation
 
+- [Domain model and business rules](docs/DOMAIN.md)
 - [Development and deployment](docs/DEVELOPMENT.md)
 - [Current codebase architecture](docs/ARCHITECTURE.md)
 - [Application user guide](docs/USER_GUIDE.md)
